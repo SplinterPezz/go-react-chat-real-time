@@ -61,7 +61,9 @@ func main() {
 	r.POST("/login", auth.Login)
 
 	r.GET("/getChats", messages.GetChats)
+	r.GET("/getMessageChat", messages.GetMessageChat)
 	r.POST("/createChat", messages.CreateChat)
+
 	// WebSocket route for chat messages
 	r.GET("/ws", messages.HandleWebSocket)
 

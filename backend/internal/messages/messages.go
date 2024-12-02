@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"runtime"
+	"strconv"
 	"sync"
 	"time"
 
@@ -27,6 +28,14 @@ var upgrader = websocket.Upgrader{
 var clients sync.Map
 
 func OnlineUsers(c *gin.Context) {
+	token := utils.RetriveTokenFromRequestHttp(c)
+
+	user, err_user := auth.GetUserFromToken(*token)
+	if err_user != nil || user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"message": "User not authorized"})
+		return
+	}
+
 	// Print a message with the number of online users
 	var userIDs []string
 
@@ -38,8 +47,11 @@ func OnlineUsers(c *gin.Context) {
 			return true
 		}
 
-		// Add the userID to the slice
-		userIDs = append(userIDs, userID)
+		//add all users connected except user himself
+		if user.ID != userID {
+			// Add the userID to the slice
+			userIDs = append(userIDs, userID)
+		}
 
 		// Continue iterating
 		return true
@@ -47,7 +59,7 @@ func OnlineUsers(c *gin.Context) {
 
 	if len(userIDs) > 0 {
 		users, err := mongodb.GetUserByIds(userIDs)
-		if err != nil {
+		if err != nil || users == nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"message": "Something went wrong on getUsersOnline"})
 			return
 		}
@@ -85,7 +97,7 @@ func HandleWebSocket(c *gin.Context) {
 
 	user, err := auth.GetUserFromToken(*token)
 	log.Println(user.Username)
-	if err != nil {
+	if err != nil || user == nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"message": "User not authorized"})
 		return
 	}
@@ -164,7 +176,6 @@ type broadcastJob struct {
 var broadcastQueue = make(chan broadcastJob, 1000)
 
 func init() {
-	log.Printf("INIT!")
 	// Start workers based on available CPU cores
 	numWorkers := runtime.NumCPU()
 	for i := 0; i < numWorkers; i++ {
@@ -190,13 +201,13 @@ func broadcastWorker() {
 
 func broadcastMessageToChat(chatID string, message models.Message) {
 	// Get all users in the chat
-	chat, err := mongodb.GetChatById(chatID)
-	if err != nil {
+	chat, err := mongodb.GetChatByIdAndSender(chatID, message.Sender)
+	if err != nil || chat == nil {
 		log.Printf("Error retrieving users for chat %s: %v", chatID, err)
 		return
 	}
 
-	if err := mongodb.SaveMessage(&message); err != nil {
+	if message, err := mongodb.SaveMessage(&message); err != nil || message == nil {
 		log.Printf("Error saving message from user %s: %v", message.Sender, err)
 		return
 	}
@@ -207,6 +218,7 @@ func broadcastMessageToChat(chatID string, message models.Message) {
 		log.Printf("Error updating chat %s: %v", message.Sender, err)
 		return
 	}
+
 	// Map of userIDs in the chat for fast lookup
 	userIDsInChat := make(map[string]struct{}, len(chat.Users))
 	for _, userID := range chat.Users {
@@ -242,14 +254,13 @@ func GetChats(c *gin.Context) {
 	token := utils.RetriveTokenFromRequestHttp(c)
 
 	user, err_user := auth.GetUserFromToken(*token)
-
-	if err_user != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"message": "User does not exist"})
+	if err_user != nil || user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"message": "User not authorized"})
 		return
 	}
 
 	chats, err_chats := mongodb.GetUserChats(user.ID)
-	if err_chats != nil {
+	if err_chats != nil || chats == nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"message": fmt.Sprintf("Something went wrong: %v", err_chats)})
 		return
 	}
@@ -257,10 +268,54 @@ func GetChats(c *gin.Context) {
 	c.JSON(http.StatusOK, chats)
 }
 
+func GetMessageChat(c *gin.Context) {
+	token := utils.RetriveTokenFromRequestHttp(c)
+	user, err := auth.GetUserFromToken(*token)
+	if err != nil || user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"message": "User not authorized"})
+		return
+	}
+
+	chatID := c.DefaultQuery("chat_id", "")
+	if chatID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "chat_id is required"})
+		return
+	}
+
+	chat, err := mongodb.GetChatByIdAndSender(chatID, user.ID)
+	if err != nil || chat == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "There are no chat with this ID or ID is malformed"})
+		return
+	}
+
+	limitQuery := c.DefaultQuery("limit", "20")
+	pageQuery := c.DefaultQuery("page", "1")
+
+	limit, err := strconv.Atoi(limitQuery)
+	if err != nil || limit <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid limit value"})
+		return
+	}
+
+	page, err := strconv.Atoi(pageQuery)
+	if err != nil || page <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid page value"})
+		return
+	}
+
+	messages, total_pages, err := mongodb.GetChatMessages(chatID, limit, page)
+	if err != nil || messages == nil {
+		c.JSON(http.StatusNotFound, gin.H{"message": "There are no messages"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"messages": messages, "total_pages": total_pages})
+}
+
 func CreateChat(c *gin.Context) {
 	token := utils.RetriveTokenFromRequestHttp(c)
 	user, err := auth.GetUserFromToken(*token)
-	if err != nil {
+	if err != nil || user == nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"message": "User not authorized"})
 		return
 	}
@@ -273,14 +328,31 @@ func CreateChat(c *gin.Context) {
 		return
 	}
 
-	// Controlla se la chat già esiste
+	if len(payload.UserID) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "UserId cannot be empty!"})
+		return
+	}
+
+	if user.ID == payload.UserID {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Cannot create a chat with yourself!"})
+		return
+	}
+
+	//Check if user exists
+	user_to_invite, err := mongodb.FindUserById(payload.UserID)
+	if err != nil || user_to_invite == nil {
+		c.JSON(http.StatusNotFound, gin.H{"message": "Cannot find User to create chat with!"})
+		return
+	}
+
+	// Check if chat already exists
 	existingChat, err := mongodb.FindChatByUsers([]string{user.ID, payload.UserID})
 	if err == nil && existingChat != nil {
 		c.JSON(http.StatusOK, existingChat)
 		return
 	}
 
-	// Crea una nuova chat
+	// Create a new Chat
 	newChat := &models.Chat{
 		Users:         []string{user.ID, payload.UserID},
 		CountMessages: 0,
@@ -288,8 +360,8 @@ func CreateChat(c *gin.Context) {
 		CreatedAt:     time.Now(),
 	}
 
-	err = mongodb.CreateChat(newChat)
-	if err != nil {
+	newChat, err = mongodb.CreateChat(newChat)
+	if err != nil || newChat == nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"message": "Failed to create chat"})
 		return
 	}

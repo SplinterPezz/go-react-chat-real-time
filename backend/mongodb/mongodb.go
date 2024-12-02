@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"time"
 
@@ -203,14 +204,34 @@ func FindUserChat(chatID string, userID string) (*models.Chat, error) {
 	return &chat, err
 }
 
-func CreateChat(chat *models.Chat) error {
-	_, err := chatsCollection.InsertOne(context.Background(), chat)
-	return err
+func CreateChat(chat *models.Chat) (*models.Chat, error) {
+	// Ensure the ID is empty (MongoDB generates it automatically)
+
+	// Insert the chat into the MongoDB collection
+	result, err := chatsCollection.InsertOne(context.Background(), chat)
+	if err != nil {
+		return nil, fmt.Errorf("failed to insert chat: %v", err)
+	}
+
+	// Set the generated ID back to the chat object
+	objectID, ok := result.InsertedID.(primitive.ObjectID)
+	if ok {
+		chat.ID = objectID.Hex()
+	}
+
+	return chat, nil
 }
 
-func SaveMessage(message *models.Message) error {
-	_, err := messagesCollection.InsertOne(context.Background(), message)
-	return err
+func SaveMessage(message *models.Message) (*models.Message, error) {
+	result, err := messagesCollection.InsertOne(context.Background(), message)
+	if err != nil {
+		return nil, fmt.Errorf("failed to save message: %v", err)
+	}
+	objectID, ok := result.InsertedID.(primitive.ObjectID)
+	if ok {
+		message.ID = objectID.Hex()
+	}
+	return message, err
 }
 
 func UpdateChat(chat *models.Chat) error {
@@ -241,7 +262,57 @@ func UpdateChat(chat *models.Chat) error {
 	return nil
 }
 
-func GetChatById(chatID string) (*models.Chat, error) {
+func FindUserById(userID string) (*models.User, error) {
+	var user models.User
+	userObjectId, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid chat ID format: %v", err)
+	}
+	// Query the chats collection for the chat document with the provided chatID (as ObjectId)
+	filter := bson.M{"_id": userObjectId}
+	err = chatsCollection.FindOne(context.Background(), filter).Decode(&user)
+	if err != nil {
+		return nil, err
+	}
+
+	return &user, nil
+}
+
+func GetChatMessages(chatID string, limit int, page int) ([]*models.Message, int, error) {
+	skip := (page - 1) * limit
+	filter := bson.M{"chat_id": chatID}
+
+	totalMessages, err := messagesCollection.CountDocuments(context.Background(), filter)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to count messages: %v", err)
+	}
+
+	// Calculate the total number of pages
+	totalPages := int(math.Ceil(float64(totalMessages) / float64(limit)))
+
+	options := options.Find()
+	options.SetSort(bson.D{{Key: "sent_at", Value: -1}}) // Ordinamento decrescente
+	options.SetLimit(int64(limit))
+	options.SetSkip(int64(skip))
+
+	cursor, err := messagesCollection.Find(context.Background(), filter, options)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to retrieve messages: %v", err)
+	}
+	defer cursor.Close(context.Background())
+
+	var messages []*models.Message
+	if err := cursor.All(context.Background(), &messages); err != nil {
+		return nil, 0, err
+	}
+
+	if messages == nil {
+		messages = []*models.Message{}
+	}
+	return messages, totalPages, nil
+}
+
+func GetChatByIdAndSender(chatID string, senderID string) (*models.Chat, error) {
 	var chat models.Chat
 
 	// Convert the chatID string to an ObjectId
@@ -251,7 +322,7 @@ func GetChatById(chatID string) (*models.Chat, error) {
 	}
 
 	// Query the chats collection for the chat document with the provided chatID (as ObjectId)
-	filter := bson.M{"_id": chatObjectID}
+	filter := bson.M{"_id": chatObjectID, "users": senderID}
 
 	// Find the chat by its ID
 	err = chatsCollection.FindOne(context.Background(), filter).Decode(&chat)
@@ -260,6 +331,5 @@ func GetChatById(chatID string) (*models.Chat, error) {
 		return nil, err
 	}
 
-	// Return the list of users in the chat
 	return &chat, nil
 }

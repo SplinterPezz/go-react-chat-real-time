@@ -136,10 +136,47 @@ func CloseMongoDB() {
 	}
 }
 
-func FindUserByUsername(username string) (*models.User, error) {
+func FindUserByEmailRegistration(email string) (*models.User, error) {
 	var user models.User
 	// Use bson.M{} to search for the user by username
+	err := usersCollection.FindOne(context.Background(), bson.M{"email": email}).Decode(&user)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("error finding user: %v", err)
+	}
+	return &user, nil
+}
+
+func FindUserByUsername(username string, returnErrorIfNotFound bool) (*models.User, error) {
+	var user models.User
+	// Search for the user by username
 	err := usersCollection.FindOne(context.Background(), bson.M{"username": username}).Decode(&user)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			if returnErrorIfNotFound {
+				return nil, fmt.Errorf("user not found")
+			}
+			return nil, nil // No error returned if user is not found for registration check
+		}
+		return nil, fmt.Errorf("error finding user: %v", err)
+	}
+	return &user, nil
+}
+
+func FindUserByUsernameOrEmail(username string) (*models.User, error) {
+	var user models.User
+	// Use bson.M{} to search for the user by username or email
+	err := usersCollection.FindOne(
+		context.Background(),
+		bson.M{
+			"$or": []interface{}{
+				bson.M{"username": username},
+				bson.M{"email": username},
+			},
+		},
+	).Decode(&user)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
 			return nil, fmt.Errorf("user not found")
@@ -150,14 +187,13 @@ func FindUserByUsername(username string) (*models.User, error) {
 }
 
 // CreateUser inserts a new user into the MongoDB collection
-func CreateUser(username, passwordHash string) error {
-	_, err := usersCollection.InsertOne(context.Background(), bson.M{
-		"username": username,
-		"password": passwordHash,
-	})
+func CreateUser(user models.User) error {
+	// Insert the User into the collection
+	_, err := usersCollection.InsertOne(context.Background(), user)
 	if err != nil {
 		return fmt.Errorf("error inserting user: %v", err)
 	}
+
 	return nil
 }
 

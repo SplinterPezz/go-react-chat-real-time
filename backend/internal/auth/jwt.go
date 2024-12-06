@@ -84,7 +84,7 @@ func GetUserFromToken(tokenString string) (*models.User, error) {
 		return nil, fmt.Errorf("could not validate token: %v", err)
 	}
 
-	user, err := mongodb.FindUserByUsername(claims.Username)
+	user, err := mongodb.FindUserByUsername(claims.Username, true)
 	if err != nil {
 		return nil, fmt.Errorf("could not find user: %v", err)
 	}

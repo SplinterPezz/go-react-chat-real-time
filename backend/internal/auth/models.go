@@ -147,8 +147,8 @@ func validateEmail(email string) bool {
 }
 
 func stripUserFields(user *models.User) {
-	user.Email = stripSpaces(user.Email)
-	user.Username = stripSpaces(user.Username)
+	user.Email = strings.ToLower(stripSpaces(user.Email))
+	user.Username = strings.ToLower(stripSpaces(user.Username))
 	user.Password = stripSpaces(user.Password)
 }
 

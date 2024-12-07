@@ -208,7 +208,7 @@ export default function SignInSignUp() {
         passwordErrorImpl(message);
         break;
       default:
-        emailErrorImpl(message);
+        usernameErrorImpl(message);
         break;
     }
   };

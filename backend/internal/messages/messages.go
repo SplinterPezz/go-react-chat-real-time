@@ -328,13 +328,13 @@ func CreateChat(c *gin.Context) {
 		return
 	}
 
-	if len(payload.UserID) == 0 {
+	if len(payload.UserID) == 0 || payload.UserID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"message": "UserId cannot be empty!"})
 		return
 	}
 
 	if user.ID == payload.UserID {
-		c.JSON(http.StatusBadRequest, gin.H{"message": "Cannot create a chat with yourself!"})
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Cannot create a chat with yourself! How are you here?! Stop use POSTMAN"})
 		return
 	}
 

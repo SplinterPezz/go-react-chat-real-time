@@ -27,14 +27,14 @@ func Register(c *gin.Context) {
 	stripUserFields(&user)
 
 	// Validate the user's data
-	if valid, err := checkValidUser(&user); !valid {
-		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
+	if valid, fieldError, err := checkValidUser(&user); !valid {
+		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error(), "fieldError": fieldError})
 		return
 	}
 
 	// Check if the email or username is already registered
-	if err := checkIfUserExists(user.Email, user.Username); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
+	if fieldError, err := checkIfUserExists(user.Email, user.Username); err != nil {
+		c.JSON(http.StatusConflict, gin.H{"message": err.Error(), "fieldError": fieldError})
 		return
 	}
 
@@ -53,53 +53,53 @@ func Register(c *gin.Context) {
 	}
 
 	// Generate JWT token for the newly created user
-	token, err := GenerateJWT(user.Username)
+	token, expiration, err := GenerateJWT(user.Username)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"message": "Could not create token : " + err.Error()})
 		return
 	}
 
 	// Return the JWT token to the user
-	c.JSON(http.StatusOK, gin.H{"token": token})
+	c.JSON(http.StatusOK, gin.H{"token": token, "expiration": expiration})
 }
 
-func checkIfUserExists(email, username string) error {
+func checkIfUserExists(email, username string) (string, error) {
 	// Check if the email is already in use
 	userEmail, err := mongodb.FindUserByEmailRegistration(email)
 	if err == nil && userEmail != nil {
-		return fmt.Errorf("this email is already registered")
+		return "email", fmt.Errorf("this email is already registered")
 	}
 
 	// Check if the username is already in use
 	existingUser, err := mongodb.FindUserByUsername(username, false)
 	if err == nil && existingUser != nil {
-		return fmt.Errorf("username already exists")
+		return "username", fmt.Errorf("username already exists")
 	}
 
-	return nil
+	return "", nil
 }
 
-func checkValidUser(user *models.User) (bool, error) {
+func checkValidUser(user *models.User) (bool, string, error) {
 	if user == nil {
-		return false, fmt.Errorf("user data is missing. Please try again")
+		return false, "", fmt.Errorf("user data is missing. Please try again")
 	}
 	if user.Email == "" {
-		return false, fmt.Errorf("email is required")
+		return false, "email", fmt.Errorf("email is required")
 	}
 	if user.Username == "" {
-		return false, fmt.Errorf("username is required")
+		return false, "username", fmt.Errorf("username is required")
 	}
 	if user.Password == "" {
-		return false, fmt.Errorf("password is required")
+		return false, "password", fmt.Errorf("password is required")
 	}
 	if !validateEmail(user.Email) {
-		return false, fmt.Errorf("invalid email format")
+		return false, "email", fmt.Errorf("invalid email format")
 	}
 	if !validatePassword(user.Password) {
-		return false, fmt.Errorf("password must be 8+ characters with uppercase, lowercase, number, and special character")
+		return false, "password", fmt.Errorf("password must be 8+ characters with uppercase, lowercase, number, and special character")
 	}
 
-	return true, nil
+	return true, "", nil
 }
 
 func validatePassword(password string) bool {
@@ -165,28 +165,46 @@ func Login(c *gin.Context) {
 		return
 	}
 
+	stripUserFields(&user)
+	//Frontend should block these request
+	if user.Email == "" && user.Username == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Username or Email are required", "fieldError": "email"})
+		return
+	}
+
+	//Frontend should block these request
+	if user.Password == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Password required", "fieldError": "password"})
+		return
+	}
+
+	emailOrUsername := user.Username
+	if emailOrUsername == "" {
+		emailOrUsername = user.Email
+	}
+
 	// Find the user by username in the database
-	storedUser, err := mongodb.FindUserByUsernameOrEmail(user.Username)
+	storedUser, err := mongodb.FindUserByUsernameOrEmail(emailOrUsername)
 	if err != nil || storedUser == nil {
 		// If user is not found or any DB error occurs, return Unauthorized error
-		c.JSON(http.StatusUnauthorized, gin.H{"message": "Invalid credentials"})
+		c.JSON(http.StatusForbidden, gin.H{"message": "Invalid credentials", "fieldError": "unauthorized"})
 		return
 	}
 
 	// Compare the stored hashed password with the provided password
 	if err := bcrypt.CompareHashAndPassword([]byte(storedUser.Password), []byte(user.Password)); err != nil {
 		// If password doesn't match, return Unauthorized error
-		c.JSON(http.StatusUnauthorized, gin.H{"message": "Invalid credentials"})
+		c.JSON(http.StatusForbidden, gin.H{"message": "Invalid credentials", "fieldError": "unauthorized"})
 		return
 	}
 
 	// Generate JWT token for the logged-in user
-	token, err := GenerateJWT(user.Username)
+	token, expiration, err := GenerateJWT(storedUser.Username)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"message": "Could not create token"})
 		return
 	}
 
 	// Send the token back to the user in the response
-	c.JSON(http.StatusOK, gin.H{"token": token})
+	c.JSON(http.StatusOK, gin.H{"token": token, "expiration": expiration})
 }

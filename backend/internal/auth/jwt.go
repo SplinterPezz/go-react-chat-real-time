@@ -18,7 +18,7 @@ type Claims struct {
 }
 
 // GenerateJWT creates a new JWT token for a user
-func GenerateJWT(username string) (string, error) {
+func GenerateJWT(username string) (string, int64, error) {
 	// Get the secret key from environment variable
 	secretKey := os.Getenv("JWT_SECRET")
 	if secretKey == "" {
@@ -27,6 +27,7 @@ func GenerateJWT(username string) (string, error) {
 
 	// Set token expiration time (e.g., 1 hour)
 	expirationTime := time.Now().Add(24 * time.Hour)
+	//expirationTime := time.Now().Add(30 * time.Second)
 
 	// Create JWT claims
 	claims := &Claims{
@@ -43,10 +44,10 @@ func GenerateJWT(username string) (string, error) {
 	// Sign the token with the secret key
 	signedToken, err := token.SignedString([]byte(secretKey))
 	if err != nil {
-		return "", fmt.Errorf("could not sign token: %v", err)
+		return "", 0, fmt.Errorf("could not sign token: %v", err)
 	}
 
-	return signedToken, nil
+	return signedToken, expirationTime.Unix(), nil
 }
 
 // ValidateJWT validates the JWT token and returns the claims if valid

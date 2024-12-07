@@ -165,15 +165,15 @@ func FindUserByUsername(username string, returnErrorIfNotFound bool) (*models.Us
 	return &user, nil
 }
 
-func FindUserByUsernameOrEmail(username string) (*models.User, error) {
+func FindUserByUsernameOrEmail(usernameOrEmail string) (*models.User, error) {
 	var user models.User
 	// Use bson.M{} to search for the user by username or email
 	err := usersCollection.FindOne(
 		context.Background(),
 		bson.M{
 			"$or": []interface{}{
-				bson.M{"username": username},
-				bson.M{"email": username},
+				bson.M{"username": usernameOrEmail},
+				bson.M{"email": usernameOrEmail},
 			},
 		},
 	).Decode(&user)

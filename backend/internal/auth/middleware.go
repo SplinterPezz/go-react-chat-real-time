@@ -10,6 +10,10 @@ import (
 
 // JWTMiddleware checks the token for authentication
 func JWTMiddleware(c *gin.Context) {
+	if c.Request.Method == http.MethodOptions {
+		c.Next()
+		return
+	}
 	// Skip the routes that don't require authentication
 	if c.Request.URL.Path == "/login" || c.Request.URL.Path == "/register" {
 		c.Next()
@@ -37,6 +41,13 @@ func JWTMiddleware(c *gin.Context) {
 	// Validate the token
 	claims, err := ValidateJWT(tokenString)
 	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"message": fmt.Sprintf("Invalid token: %v", err)})
+		c.Abort()
+		return
+	}
+
+	user, err := GetUserFromToken(tokenString)
+	if user == nil || err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"message": fmt.Sprintf("Invalid token: %v", err)})
 		c.Abort()
 		return

@@ -11,6 +11,7 @@ import {
 } from 'redux-persist';
 import storage from 'redux-persist/lib/storage';
 import authSlice from './authSlice.ts';
+import {} from 'node-forge';
 
 // Persist configuration
 const persistConfig = {

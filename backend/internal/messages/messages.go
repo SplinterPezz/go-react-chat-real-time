@@ -5,6 +5,8 @@ import (
 	"backend/internal/models"
 	"backend/internal/utils"
 	"backend/mongodb"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -25,64 +27,117 @@ var upgrader = websocket.Upgrader{
 		return true
 	},
 }
-var clients sync.Map
 
-func OnlineUsers(c *gin.Context) {
-	token := utils.RetriveTokenFromRequestHttp(c)
-
-	user, err_user := auth.GetUserFromToken(*token)
-	if err_user != nil || user == nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"message": "User not authorized"})
-		return
-	}
-
-	// Print a message with the number of online users
-	var userIDs []string
-
-	// Iterate over the clients map and collect user IDs
-	clients.Range(func(key, value interface{}) bool {
-		userID, ok := key.(string)
-		if !ok {
-			log.Println("Error: Invalid key type")
-			return true
-		}
-
-		//add all users connected except user himself
-		if user.ID != userID {
-			// Add the userID to the slice
-			userIDs = append(userIDs, userID)
-		}
-
-		// Continue iterating
-		return true
-	})
-
-	if len(userIDs) > 0 {
-		users, err := mongodb.GetUserByIds(userIDs)
-		if err != nil || users == nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"message": "Something went wrong on getUsersOnline"})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{
-			"online_users": users,
-		})
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{
-		"online_users": []models.UserResponse{},
-	})
+// Broadcast job for sending messages
+type broadcastJob struct {
+	message interface{}
+	conn    *websocket.Conn
 }
 
-func HandleWebSocket(c *gin.Context) {
-	token := utils.RetriveTokenFromRequestHttp(c) // token is of type *string
+// Broadcast queue with buffer
+var broadcastQueue = make(chan broadcastJob, 1000)
 
+// ClientInfo stores multiple WebSocket connections for a single user
+type ClientInfo struct {
+	mu          sync.RWMutex
+	Connections map[string]*websocket.Conn
+}
+
+const (
+	ConnectionStatusConnect    = "connect"
+	ConnectionStatusDisconnect = "disconnect"
+)
+
+// New struct for connection status message
+type ConnectionStatusMessage struct {
+	Type        string                 `json:"type"`
+	OnlineUsers []*models.UserResponse `json:"online_users"`
+}
+
+// Clients map to store multiple connections per user
+var clients = sync.Map{}
+
+// GenerateUniqueID creates a cryptographically secure unique identifier
+func GenerateUniqueID() string {
+	b := make([]byte, 16)
+	_, err := rand.Read(b)
+	if err != nil {
+		// Fallback to timestamp if random generation fails
+		return fmt.Sprintf("%d", time.Now().UnixNano())
+	}
+	return base64.URLEncoding.EncodeToString(b)
+}
+
+// AddConnection adds a new WebSocket connection for a user
+func (ci *ClientInfo) AddConnection(clientID string, conn *websocket.Conn) {
+	ci.mu.Lock()
+	defer ci.mu.Unlock()
+	if ci.Connections == nil {
+		ci.Connections = make(map[string]*websocket.Conn)
+	}
+	ci.Connections[clientID] = conn
+}
+
+// RemoveConnection removes a specific WebSocket connection for a user
+func (ci *ClientInfo) RemoveConnection(clientID string) {
+	ci.mu.Lock()
+	defer ci.mu.Unlock()
+	delete(ci.Connections, clientID)
+}
+
+// GetConnections returns all connections for a user
+func (ci *ClientInfo) GetConnections() map[string]*websocket.Conn {
+	ci.mu.RLock()
+	defer ci.mu.RUnlock()
+	return ci.Connections
+}
+
+// IsEmpty checks if the user has no active connections
+func (ci *ClientInfo) IsEmpty() bool {
+	ci.mu.RLock()
+	defer ci.mu.RUnlock()
+	return len(ci.Connections) == 0
+}
+
+// Initialize broadcast workers
+func init() {
+	// Start workers based on available CPU cores
+	numWorkers := runtime.NumCPU()
+	for i := 0; i < numWorkers; i++ {
+		go broadcastWorker()
+	}
+}
+
+// Broadcast worker to send messages
+func broadcastWorker() {
+	log.Println("Broadcasting worker started...")
+	for job := range broadcastQueue {
+		if err := job.conn.WriteJSON(job.message); err != nil {
+			if websocket.IsUnexpectedCloseError(err) {
+				log.Printf("Connection closed unexpectedly: %v", err)
+				continue
+			}
+			log.Println("Error broadcasting message:", err)
+		}
+	}
+}
+
+// HandleWebSocket manages WebSocket connection for users
+func HandleWebSocket(c *gin.Context) {
+	// Generate a unique client ID for this connection
+	clientID := GenerateUniqueID()
+	log.Println("ClientID", clientID)
+	// Retrieve token from request
+	token := utils.RetriveTokenFromRequestHttp(c)
+
+	// Token retrieval logic
 	if token == nil || *token == "" {
-		// Try to get the token from the query parameter
+		// Try query parameter
 		tokenFromQuery := c.DefaultQuery("token", "")
 		if tokenFromQuery != "" {
 			token = &tokenFromQuery
 		} else {
-			// Try to get the token from cookies
+			// Try cookies
 			cookieToken, err := c.Cookie("auth_token")
 			if err == nil && cookieToken != "" {
 				token = &cookieToken
@@ -90,36 +145,59 @@ func HandleWebSocket(c *gin.Context) {
 		}
 	}
 
+	// Validate token
 	if token == nil || *token == "" {
 		c.JSON(http.StatusUnauthorized, gin.H{"message": "Authorization token is required"})
 		return
 	}
 
+	// Authenticate user
 	user, err := auth.GetUserFromToken(*token)
-	log.Println(user.Username)
 	if err != nil || user == nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"message": "User not authorized"})
 		return
 	}
 
+	// Upgrade to WebSocket connection
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
-		// panic(err)
-		log.Printf("%s, error while Upgrading websocket connection\n", err.Error())
+		log.Printf("Error upgrading websocket connection: %v\n", err)
 		c.AbortWithError(http.StatusInternalServerError, err)
 		return
 	}
 
-	clients.Store(user.ID, conn)
+	// Retrieve or create ClientInfo for the user
+	clientInfoRaw, _ := clients.LoadOrStore(user.ID, &ClientInfo{})
+	clientInfo := clientInfoRaw.(*ClientInfo)
 
-	// Start a separate goroutine to handle messages for this client
-	go handleMessages(user.ID, conn)
+	// Add this specific connection to the user's connections
+	clientInfo.AddConnection(clientID, conn)
+
+	// Broadcasting message on Connection User
+	broadcastConnectionStatus(ConnectionStatusConnect)
+
+	// Start message handling goroutine
+	go handleMessages(user.ID, clientID, conn)
 }
 
-func handleMessages(userID string, conn *websocket.Conn) {
+// handleMessages processes incoming WebSocket messages
+func handleMessages(userID, clientID string, conn *websocket.Conn) {
 	defer func() {
-		log.Printf("Removing client %s from the connected users list due to disconnection", userID)
-		clients.Delete(userID)
+		// Retrieve the client info
+		clientInfoRaw, ok := clients.Load(userID)
+		if !ok {
+			return
+		}
+		clientInfo := clientInfoRaw.(*ClientInfo)
+
+		// Remove this specific connection
+		clientInfo.RemoveConnection(clientID)
+
+		// If no more connections, remove the user from clients
+		if clientInfo.IsEmpty() {
+			clients.Delete(userID)
+			broadcastConnectionStatus(ConnectionStatusDisconnect)
+		}
 
 		// Close the connection if it's still open
 		if conn != nil {
@@ -155,10 +233,7 @@ func handleMessages(userID string, conn *websocket.Conn) {
 			break
 		}
 
-		// Log the deserialized message
-		log.Printf("Received message from user %s: %+v", userID, message)
-
-		// Process the message (save it and broadcast it)
+		// Process the message
 		message.SentAt = time.Now()
 		message.Sender = userID
 
@@ -168,37 +243,58 @@ func handleMessages(userID string, conn *websocket.Conn) {
 	}
 }
 
-type broadcastJob struct {
-	message models.Message
-	conn    *websocket.Conn
-}
+func broadcastConnectionStatus(statusType string) {
+	// Get online users
+	var userIDs []string
 
-var broadcastQueue = make(chan broadcastJob, 1000)
+	// Collect online user IDs
+	clients.Range(func(key, value interface{}) bool {
+		userID, ok := key.(string)
+		if !ok {
+			log.Println("Error: Invalid key type")
+			return true
+		}
+		userIDs = append(userIDs, userID)
+		return true
+	})
 
-func init() {
-	// Start workers based on available CPU cores
-	numWorkers := runtime.NumCPU()
-	for i := 0; i < numWorkers; i++ {
-		go broadcastWorker() // Start each worker as a goroutine
-	}
-}
-
-func broadcastWorker() {
-	log.Printf("Broadcasting worker started . . .")
-	count := 0
-	for job := range broadcastQueue {
-		count++
-		log.Printf("Broadcasting worker count: %d", count)
-		if err := job.conn.WriteJSON(job.message); err != nil {
-			if websocket.IsUnexpectedCloseError(err) {
-				log.Printf("Connection closed unexpectedly: %v", err)
-				continue
-			}
-			log.Println("Error broadcasting message:", err)
+	// Retrieve user details
+	var onlineUsers []*models.UserResponse
+	if len(userIDs) > 0 {
+		onlineUsers, _ = mongodb.GetUserByIds(userIDs)
+		log.Printf("%d", len(onlineUsers))
+		if onlineUsers == nil {
+			log.Printf("Error retrieving online users")
+			return
 		}
 	}
+
+	// Prepare connection status message
+	connectionStatus := ConnectionStatusMessage{
+		Type:        statusType,
+		OnlineUsers: onlineUsers,
+	}
+
+	// Broadcast to all connected clients
+	clients.Range(func(key, value interface{}) bool {
+		clientInfo := value.(*ClientInfo)
+
+		// Get all connections for this user
+		connections := clientInfo.GetConnections()
+
+		// Broadcast to all of the user's connections
+		for _, conn := range connections {
+			broadcastQueue <- broadcastJob{
+				message: connectionStatus,
+				conn:    conn,
+			}
+		}
+
+		return true
+	})
 }
 
+// broadcastMessageToChat sends a message to all users in a specific chat
 func broadcastMessageToChat(chatID string, message models.Message) {
 	// Get all users in the chat
 	chat, err := mongodb.GetChatByIdAndSender(chatID, message.Sender)
@@ -207,12 +303,15 @@ func broadcastMessageToChat(chatID string, message models.Message) {
 		return
 	}
 
-	if message, err := mongodb.SaveMessage(&message); err != nil || message == nil {
+	// Save the message
+	savedMessage, err := mongodb.SaveMessage(&message)
+	if err != nil || savedMessage == nil {
 		log.Printf("Error saving message from user %s: %v", message.Sender, err)
 		return
 	}
 
-	chat.LastMessage = message.Content
+	// Update chat details
+	chat.LastMessage = savedMessage.Content
 	chat.CountMessages += 1
 	if err := mongodb.UpdateChat(chat); err != nil {
 		log.Printf("Error updating chat %s: %v", message.Sender, err)
@@ -225,21 +324,27 @@ func broadcastMessageToChat(chatID string, message models.Message) {
 		userIDsInChat[userID] = struct{}{}
 	}
 
-	// For each connected client, check if they are in the chat
+	// Broadcast to all clients of users in the chat
 	clients.Range(func(key, value interface{}) bool {
-		conn := value.(*websocket.Conn)
 		userID := key.(string)
 
-		// If the user is part of the chat, send the message
+		// Check if this user is in the chat
 		if _, exists := userIDsInChat[userID]; exists {
-			// Enqueue the message to be broadcasted to this user
-			broadcastQueue <- broadcastJob{
-				message: message,
-				conn:    conn,
+			// Get the client info for this user
+			clientInfo := value.(*ClientInfo)
+
+			// Get all connections for this user
+			connections := clientInfo.GetConnections()
+
+			// Broadcast to all of the user's connections
+			for _, conn := range connections {
+				broadcastQueue <- broadcastJob{
+					message: message,
+					conn:    conn,
+				}
 			}
 		}
 
-		// Continue to the next client
 		return true
 	})
 }
@@ -367,4 +472,48 @@ func CreateChat(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusCreated, newChat)
+}
+
+// OnlineUsers returns a list of currently connected users
+func OnlineUsers(c *gin.Context) {
+	token := utils.RetriveTokenFromRequestHttp(c)
+
+	user, err_user := auth.GetUserFromToken(*token)
+	if err_user != nil || user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"message": "User not authorized"})
+		return
+	}
+
+	var userIDs []string
+
+	// Iterate over the clients map and collect user IDs
+	clients.Range(func(key, value interface{}) bool {
+		userID, ok := key.(string)
+		if !ok {
+			log.Println("Error: Invalid key type")
+			return true
+		}
+
+		// Add all users connected except the user themselves
+		if user.ID != userID {
+			userIDs = append(userIDs, userID)
+		}
+
+		return true
+	})
+
+	if len(userIDs) > 0 {
+		users, err := mongodb.GetUserByIds(userIDs)
+		if err != nil || users == nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"message": "Something went wrong on getUsersOnline"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"online_users": users,
+		})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"online_users": []models.UserResponse{},
+	})
 }

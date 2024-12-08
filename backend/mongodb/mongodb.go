@@ -302,11 +302,11 @@ func FindUserById(userID string) (*models.User, error) {
 	var user models.User
 	userObjectId, err := primitive.ObjectIDFromHex(userID)
 	if err != nil {
-		return nil, fmt.Errorf("invalid chat ID format: %v", err)
+		return nil, fmt.Errorf("invalid user ID format: %v", err)
 	}
-	// Query the chats collection for the chat document with the provided chatID (as ObjectId)
+
 	filter := bson.M{"_id": userObjectId}
-	err = chatsCollection.FindOne(context.Background(), filter).Decode(&user)
+	err = usersCollection.FindOne(context.Background(), filter).Decode(&user)
 	if err != nil {
 		return nil, err
 	}

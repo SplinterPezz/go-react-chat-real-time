@@ -3,11 +3,7 @@ import { useSelector } from 'react-redux';
 import React, {useEffect} from 'react'
 import { checkAuthentication } from '../store/authSlice.ts';
 import { useDispatch } from 'react-redux';
-export interface RootState {
-  auth: {
-    isAuthenticated: boolean;
-  };
-}
+import { RootState } from '../store/store.ts';
 
 
 const PrivateRoute = () => {

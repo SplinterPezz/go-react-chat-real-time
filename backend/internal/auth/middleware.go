@@ -15,7 +15,9 @@ func JWTMiddleware(c *gin.Context) {
 		return
 	}
 	// Skip the routes that don't require authentication
-	if c.Request.URL.Path == "/login" || c.Request.URL.Path == "/register" {
+	// WS Route have a custom auth token checker
+	// login and registration are public
+	if c.Request.URL.Path == "/login" || c.Request.URL.Path == "/register" || c.Request.URL.Path == "/ws" {
 		c.Next()
 		return
 	}

@@ -26,7 +26,7 @@ import {
 import "./login.css";
 import { useDispatch, useSelector } from "react-redux";
 import { loginSuccess } from '../store/authSlice.ts';
-import { RootState } from "../Utils/PrivateRoute.tsx";
+import { RootState } from "../store/store.ts";
 import { useNavigate } from "react-router-dom";
 
 const SignInContainer = styled(Stack)(({ theme }) => ({

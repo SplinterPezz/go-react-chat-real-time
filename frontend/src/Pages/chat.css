@@ -1,0 +1,186 @@
+.online-person-container {
+  max-width: 360px !important;
+  min-width: 360px;
+}
+
+.online-users-container {
+  perspective: 1000px;
+}
+
+.online-users-wrapper {
+  transition: all 0.3s ease;
+}
+
+.box-shadow-box {
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+}
+
+.online-users-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 15px;
+}
+
+.online-users-title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #2c3e50;
+  position: relative;
+}
+
+.online-count-badge {
+  background-color: #4caf50;
+  color: white;
+  border-radius: 50%;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.online-users-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.online-user-item {
+  transition: all 0.3s ease;
+  will-change: transform;
+}
+
+.avatar-wrapper {
+  position: relative;
+  display: inline-block;
+}
+
+.online-users-container {
+  background-color: var(--appbar-default-bg);
+}
+
+.online-status-indicator {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  left: 35px;
+  width: 12px;
+  height: 12px;
+  background-color: #4caf50;
+  border-radius: 50%;
+  border: 2px solid white;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.offline-status-indicator {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  left: 35px;
+  width: 12px;
+  height: 12px;
+  background-color: #303030;
+  border-radius: 50%;
+  border: 2px solid white;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.no-users-message {
+  text-align: center;
+  color: #7f8c8d;
+  font-style: italic;
+  padding: 20px;
+  background-color: rgba(255, 255, 255, 0.7);
+}
+
+@keyframes pulse {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.user-hover-effect {
+  position: relative;
+  overflow: hidden;
+  transition: all 0.3s ease;
+  cursor: pointer;
+}
+
+.user-hover-effect::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  transition: all 0.3s ease;
+  pointer-events: none;
+}
+
+.user-hover-effect:hover::before {
+  /*
+  box shadow effect on hover
+  */
+  background-color: rgba(95, 95, 95, 0.051);
+    
+  transition: all 0.3s ease;
+}
+
+.user-hover-effect:active::before {
+  background-color: rgba(95, 95, 95, 0.103);
+  transition: all 0.2s ease;
+}
+
+/* Optional: Minimal gradient fade effect */
+.user-hover-effect::after {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  right: -50%;
+  bottom: -50%;
+  
+  opacity: 0;
+  transition: all 0.4s ease;
+  pointer-events: none;
+}
+
+.user-hover-effect:hover::after {
+  opacity: 1;
+}
+
+/* Very subtle scaling */
+.user-hover-effect:hover {
+  transform: translateY(-1px);
+}
+
+.avatar-triangle {
+  width: 0px;
+  height: 0px;
+  bottom: "-6px";
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-top: 9px solid #4a4a4a;
+  position: absolute;
+  bottom: 0px;
+  left: 90%;
+  transform: translateX(-50%);
+  flex: none;
+  --bs-gutter-x: none;
+}
+
+.username-label {
+  color: black;
+  margin-right: -15px;
+  font-size: 1.3rem;
+  font-weight: bold;
+}

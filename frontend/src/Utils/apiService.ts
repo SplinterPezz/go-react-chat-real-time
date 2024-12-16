@@ -1,12 +1,7 @@
 import { store } from "../store/store.ts";
 import { checkAuthentication, logout } from "../store/authSlice.ts";
+import { ApiError } from "../Models/models.ts";
 
-export interface ApiError {
-  success: boolean;
-  error?: string;
-  fieldError?: string;
-  customMessage?: string;  // Optional field for other error-related information
-}
 const whitelist = ["/register", "/login"]
 
 export async function fetchFromApi<T>(
@@ -15,7 +10,7 @@ export async function fetchFromApi<T>(
 ): Promise<T | ApiError> {  
   const baseUrl = process.env.REACT_APP_API_URL || '';
   const isInWhitelist = whitelist.includes(endpoint)
-  console.log(isInWhitelist)
+  
   try {
     // Get the current state from Redux store
     const state = store.getState();

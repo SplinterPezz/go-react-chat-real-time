@@ -6,7 +6,6 @@ const HelloButton: React.FC = () => {
   const handleClick = async () => {
     try {
       const response = await helloworld()
-      console.log(response)
     } catch (error) {
       
     }

@@ -1,7 +1,7 @@
 import { configureStore, combineReducers } from '@reduxjs/toolkit';
 import { 
   persistStore, 
-  persistReducer, 
+  persistReducer,
   FLUSH,
   REHYDRATE,
   PAUSE,
@@ -11,25 +11,23 @@ import {
 } from 'redux-persist';
 import storage from 'redux-persist/lib/storage';
 import authSlice from './authSlice.ts';
+import chatSlice from './chatSlice.ts';
 import {} from 'node-forge';
 
-// Persist configuration
 const persistConfig = {
-  key: 'root', // Use 'root' to persist the entire state
+  key: 'root',
   version: 1,
   storage,
-  whitelist: ['auth'] // Only persist the auth slice
+  whitelist: ['auth', 'chat']
 };
 
-// Combine reducers
 const rootReducer = combineReducers({
-  auth: authSlice
+  auth: authSlice,
+  chat: chatSlice
 });
 
-// Create persisted reducer
 const persistedReducer = persistReducer(persistConfig, rootReducer);
 
-// Configure store with persisted reducer
 export const store = configureStore({
   reducer: persistedReducer,
   middleware: (getDefaultMiddleware) =>
@@ -41,9 +39,7 @@ export const store = configureStore({
   devTools: process.env.NODE_ENV !== 'production',
 });
 
-// Create persistor
 export const persistor = persistStore(store);
 
-// Types
 export type RootState = ReturnType<typeof store.getState>;
 export type AppDispatch = typeof store.dispatch;

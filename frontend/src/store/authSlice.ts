@@ -1,6 +1,9 @@
 import { createSlice, PayloadAction } from '@reduxjs/toolkit';
+import { clearAllChats } from './chatSlice.ts';
+import { AppDispatch } from './store';
 
-interface AuthState {
+export interface AuthState {
+  id: string | null;
   user: string | null;
   token: string | null;
   expiration: number | null;
@@ -8,6 +11,7 @@ interface AuthState {
 }
 
 const initialState: AuthState = {
+  id : null,
   user: null,
   token: null,
   expiration: null,
@@ -18,15 +22,17 @@ const authSlice = createSlice({
   name: 'auth',
   initialState,
   reducers: {
-    loginSuccess(state, action: PayloadAction<{ user: string; token: string; expiration: number }>) {
+    loginSuccess(state, action: PayloadAction<{ id:string, user: string; token: string; expiration: number }>) {
       console.log('loginSuccess action dispatched');
+      state.id = action.payload.id;
       state.user = action.payload.user;
       state.token = action.payload.token;
       state.expiration = action.payload.expiration;
       state.isAuthenticated = true;
     },
-    logout(state) {
+    logoutSuccess(state) {
       console.log('logout action dispatched');
+      state.id = null;
       state.user = null;
       state.token = null;
       state.expiration = null;
@@ -36,6 +42,7 @@ const authSlice = createSlice({
       // Check if the token is still valid
       // We can also implement some logics to ping authorization for 401 status
       if (state.expiration && Date.now() > (state.expiration * 1000)) {
+        state.id = null;
         state.user = null;
         state.token = null;
         state.expiration = null;
@@ -45,5 +52,10 @@ const authSlice = createSlice({
   },
 });
 
-export const { loginSuccess, logout, checkAuthentication } = authSlice.actions;
+export const { loginSuccess, logoutSuccess, checkAuthentication } = authSlice.actions;
+export const logout = () => (dispatch: AppDispatch) => {
+  dispatch(clearAllChats());
+  dispatch(logoutSuccess());
+};
+
 export default authSlice.reducer;

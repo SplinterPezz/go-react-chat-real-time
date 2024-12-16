@@ -81,6 +81,7 @@ func main() {
 	r.POST("/login", auth.Login)
 
 	r.GET("/getChats", messages.GetChats)
+	r.GET("/getChatById", messages.GetChatsById)
 	r.GET("/getMessageChat", messages.GetMessageChat)
 	r.POST("/createChat", messages.CreateChat)
 

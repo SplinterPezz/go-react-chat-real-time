@@ -187,23 +187,27 @@ func FindUserByUsernameOrEmail(usernameOrEmail string) (*models.User, error) {
 }
 
 // CreateUser inserts a new user into the MongoDB collection
-func CreateUser(user models.User) error {
+func CreateUser(user models.User) (string, error) {
 	// Insert the User into the collection
-	_, err := usersCollection.InsertOne(context.Background(), user)
+	data, err := usersCollection.InsertOne(context.Background(), user)
 	if err != nil {
-		return fmt.Errorf("error inserting user: %v", err)
+		return "", fmt.Errorf("error inserting user: %v", err)
+	}
+	id, ok := data.InsertedID.(primitive.ObjectID)
+	if !ok {
+		return "", fmt.Errorf("error converting inserted ID ObjectId")
 	}
 
-	return nil
+	return id.Hex(), nil
 }
 
-func GetUserChats(userID string) ([]*models.Chat, error) {
+func GetUserChatsWithMessages(userID string) ([]*models.Chat, error) {
 	var chats []*models.Chat
 
 	// Find documents in the chats collection where "users" contains the userID
 	cursor, err := chatsCollection.Find(
 		context.Background(),
-		bson.M{"users": bson.M{"$in": []string{userID}}})
+		bson.M{"users": bson.M{"$in": []string{userID}}, "count_messages": bson.M{"$gt": 0}})
 	if err != nil {
 		return nil, err
 	}
@@ -218,6 +222,32 @@ func GetUserChats(userID string) ([]*models.Chat, error) {
 		chats = []*models.Chat{}
 	}
 	return chats, nil
+}
+
+func GetUserChatById(userID string, chatID string) (*models.Chat, error) {
+	chatIDObjectId, err := primitive.ObjectIDFromHex(chatID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid chat ID format: %v", err)
+	}
+
+	var chat models.Chat
+
+	// Find a document in chats collection where id matches and user is in users array
+	errQuery := chatsCollection.FindOne(
+		context.Background(),
+		bson.M{
+			"_id":   chatIDObjectId,
+			"users": bson.M{"$in": []string{userID}},
+		}).Decode(&chat)
+
+	if errQuery != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	return &chat, nil
 }
 
 func FindChatByUsers(userIDs []string) (*models.Chat, error) {
@@ -271,24 +301,30 @@ func SaveMessage(message *models.Message) (*models.Message, error) {
 }
 
 func UpdateChat(chat *models.Chat) error {
-	// Convert chat.ID to ObjectId if it's a string
 	chatID, err := primitive.ObjectIDFromHex(chat.ID)
 	if err != nil {
 		return fmt.Errorf("invalid chat ID format: %v", err)
 	}
 
-	// Create a filter to find the chat document by _id
 	filter := bson.M{"_id": chatID}
 
-	// Create the update operation
-	update := bson.M{
-		"$set": bson.M{
-			"last_message":   chat.LastMessage,   // Update the LastMessage field
-			"count_messages": chat.CountMessages, // Update the CreatedAt field (optional, if needed)
-		},
+	// Convert struct to bson.M and exclude _id
+	chatBSON, err := bson.Marshal(chat)
+	if err != nil {
+		return err
 	}
 
-	// Perform the update on the document
+	var updateDoc bson.M
+	err = bson.Unmarshal(chatBSON, &updateDoc)
+	if err != nil {
+		return err
+	}
+
+	// Remove the _id field from the update document
+	delete(updateDoc, "_id")
+
+	update := bson.M{"$set": updateDoc}
+
 	_, err = chatsCollection.UpdateOne(context.Background(), filter, update)
 	if err != nil {
 		log.Printf("Error updating chat: %v", err)

@@ -20,14 +20,13 @@ import { SitemarkIcon } from "./CustomIcons.tsx";
 import {
   login,
   register,
-  LoginModel,
-  RegisterModel,
 } from "../Services/authService.ts";
 import "./login.css";
 import { useDispatch, useSelector } from "react-redux";
 import { loginSuccess } from '../store/authSlice.ts';
 import { RootState } from "../store/store.ts";
 import { useNavigate } from "react-router-dom";
+import { RegisterModel, LoginModel } from "../Models/models.ts";
 
 const SignInContainer = styled(Stack)(({ theme }) => ({
   height: "calc((1 - var(--template-frame-height, 0)) * 100dvh)",
@@ -264,7 +263,8 @@ export default function SignInSignUp() {
           triggerError('Registration successful! You have been logged in automatically.', "success")
           //set loginToken.token and loginToken.expiration and email to store
           dispatch(loginSuccess({
-            user: email,
+            id: registerToken.id,
+            user: registerToken.user,
             token: registerToken.token,
             expiration: registerToken.expiration,
           }));
@@ -288,11 +288,12 @@ export default function SignInSignUp() {
 
           //set loginToken.token and loginToken.expiration and email to store
           dispatch(loginSuccess({
-            user: email,
+            id: loginToken.id,
+            user: loginToken.user,
             token: loginToken.token,
             expiration: loginToken.expiration,
           }));
-          //navigate('/chat');
+          
         } else if (loginToken.fieldError && loginToken.error) {
           handleErrorField(loginToken.fieldError, loginToken.error);
         } else {

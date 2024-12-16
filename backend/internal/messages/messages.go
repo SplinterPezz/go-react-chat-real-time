@@ -196,6 +196,7 @@ func handleMessages(userID, clientID string, conn *websocket.Conn) {
 		// If no more connections, remove the user from clients
 		if clientInfo.IsEmpty() {
 			clients.Delete(userID)
+			log.Printf("Broadcasting connection status disconnect")
 			broadcastConnectionStatus(ConnectionStatusDisconnect)
 		}
 
@@ -236,6 +237,8 @@ func handleMessages(userID, clientID string, conn *websocket.Conn) {
 		// Process the message
 		message.SentAt = time.Now()
 		message.Sender = userID
+		messageType := "message"
+		message.Type = &messageType
 
 		// Broadcast the message to other users in the chat
 		log.Printf("Broadcasting message from user %s in chat %s", userID, message.ChatID)
@@ -303,6 +306,24 @@ func broadcastMessageToChat(chatID string, message models.Message) {
 		return
 	}
 
+	filteredUsers := []string{}
+	for _, user := range chat.Users {
+		if user != message.Sender {
+			filteredUsers = append(filteredUsers, user)
+		}
+	}
+
+	if len(filteredUsers) == 0 {
+		log.Printf("Error retrieving users for chat %s, something went wrong, no users in chat.", chatID)
+		return
+	}
+
+	usersInChat, err := mongodb.GetUserByIds(filteredUsers)
+	if err != nil || usersInChat == nil || len(usersInChat) == 0 {
+		log.Printf("Error retrieving users for chat %s, something went wrong, no users in chat found on DB.", chatID)
+		return
+	}
+
 	// Save the message
 	savedMessage, err := mongodb.SaveMessage(&message)
 	if err != nil || savedMessage == nil {
@@ -311,7 +332,11 @@ func broadcastMessageToChat(chatID string, message models.Message) {
 	}
 
 	// Update chat details
-	chat.LastMessage = savedMessage.Content
+	timeNow := time.Now()
+	chat.LastMessage = &savedMessage.Content
+	chat.LastMessageBy = &savedMessage.Sender
+	chat.LastMessageAt = &timeNow
+	chat.LastMessageId = &savedMessage.ID
 	chat.CountMessages += 1
 	if err := mongodb.UpdateChat(chat); err != nil {
 		log.Printf("Error updating chat %s: %v", message.Sender, err)
@@ -364,13 +389,132 @@ func GetChats(c *gin.Context) {
 		return
 	}
 
-	chats, err_chats := mongodb.GetUserChats(user.ID)
+	chats, err_chats := mongodb.GetUserChatsWithMessages(user.ID)
 	if err_chats != nil || chats == nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"message": fmt.Sprintf("Something went wrong: %v", err_chats)})
 		return
 	}
 
+	if len(chats) == 0 {
+		c.JSON(http.StatusOK, chats)
+		return
+	}
+
+	err := setUsersDataMultipleChats(user.ID, chats)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": fmt.Sprintf("Something went wrong: %v", err)})
+		return
+	}
+
 	c.JSON(http.StatusOK, chats)
+}
+
+func GetChatsById(c *gin.Context) {
+	token := utils.RetriveTokenFromRequestHttp(c)
+
+	user, err_user := auth.GetUserFromToken(*token)
+	if err_user != nil || user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"message": "User not authorized"})
+		return
+	}
+
+	chatID := c.DefaultQuery("chat_id", "")
+	if chatID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "chat_id is required"})
+		return
+	}
+
+	chat, err_chats := mongodb.GetUserChatById(user.ID, chatID)
+	if err_chats != nil || chat == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": fmt.Sprintf("Something went wrong: %v", err_chats)})
+		return
+	}
+
+	err := setUsersDataSingleChat(user.ID, chat)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": fmt.Sprintf("Something went wrong: %v", err)})
+		return
+	}
+
+	c.JSON(http.StatusOK, chat)
+}
+
+func setUsersDataSingleChat(userId string, chat *models.Chat) error {
+	userIDSet := make(map[string]struct{})
+	for _, uid := range chat.Users {
+		if uid != userId {
+			userIDSet[uid] = struct{}{}
+		}
+	}
+
+	userIDs := make([]string, 0, len(userIDSet))
+	for uid := range userIDSet {
+		userIDs = append(userIDs, uid)
+	}
+
+	userResponses, err := mongodb.GetUserByIds(userIDs)
+	if err != nil {
+		return fmt.Errorf("failed to get user responses: %w", err)
+	}
+
+	// Create a map for quick lookup of UserResponse by user ID
+	userResponseMap := make(map[string]*models.UserResponse)
+	for _, userResponse := range userResponses {
+		userResponseMap[userResponse.ID] = userResponse
+	}
+
+	for _, uid := range chat.Users {
+		if userResponse, exists := userResponseMap[uid]; exists {
+			chat.UserData = userResponse
+			break
+		}
+	}
+
+	return nil
+}
+
+func setUsersDataMultipleChats(userId string, chats []*models.Chat) error {
+	// Create a set (map) to store unique user IDs from all chats
+	userIDSet := make(map[string]struct{})
+
+	// Collect distinct user IDs from each chat's Users list, excluding the provided userId
+	for _, chat := range chats {
+		for _, uid := range chat.Users {
+			if uid != userId {
+				userIDSet[uid] = struct{}{}
+			}
+		}
+	}
+
+	// Convert the set of user IDs to a slice
+	userIDs := make([]string, 0, len(userIDSet))
+	for uid := range userIDSet {
+		userIDs = append(userIDs, uid)
+	}
+
+	// Call the MongoDB function to get user details for the collected user IDs
+	userResponses, err := mongodb.GetUserByIds(userIDs)
+	if err != nil {
+		return fmt.Errorf("failed to get user responses: %w", err)
+	}
+
+	// Create a map for quick lookup of UserResponse by user ID
+	userResponseMap := make(map[string]*models.UserResponse)
+	for _, userResponse := range userResponses {
+		userResponseMap[userResponse.ID] = userResponse
+	}
+
+	// Update each chat's usersData with the UserResponse objects
+	for _, chat := range chats {
+		for _, uid := range chat.Users {
+			if userResponse, exists := userResponseMap[uid]; exists {
+				chat.UserData = userResponse
+				break
+			}
+		}
+	}
+
+	return nil
 }
 
 func GetMessageChat(c *gin.Context) {
@@ -397,14 +541,14 @@ func GetMessageChat(c *gin.Context) {
 	pageQuery := c.DefaultQuery("page", "1")
 
 	limit, err := strconv.Atoi(limitQuery)
-	if err != nil || limit <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid limit value"})
+	if err != nil || limit <= 0 || limit >= 100 {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid limit value. Limit should be > 0 and < 100."})
 		return
 	}
 
 	page, err := strconv.Atoi(pageQuery)
 	if err != nil || page <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid page value"})
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid page value. Page should be > 0."})
 		return
 	}
 
@@ -453,6 +597,7 @@ func CreateChat(c *gin.Context) {
 	// Check if chat already exists
 	existingChat, err := mongodb.FindChatByUsers([]string{user.ID, payload.UserID})
 	if err == nil && existingChat != nil {
+		setUsersDataSingleChat(user.ID, existingChat)
 		c.JSON(http.StatusOK, existingChat)
 		return
 	}
@@ -471,6 +616,7 @@ func CreateChat(c *gin.Context) {
 		return
 	}
 
+	setUsersDataSingleChat(user.ID, newChat)
 	c.JSON(http.StatusCreated, newChat)
 }
 

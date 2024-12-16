@@ -45,9 +45,10 @@ func Register(c *gin.Context) {
 		return
 	}
 	user.Password = string(hashedPassword)
+	userId, err := mongodb.CreateUser(user)
 
 	// Create the user in the database
-	if err := mongodb.CreateUser(user); err != nil {
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"message": "Could not create user : " + err.Error()})
 		return
 	}
@@ -60,7 +61,7 @@ func Register(c *gin.Context) {
 	}
 
 	// Return the JWT token to the user
-	c.JSON(http.StatusOK, gin.H{"token": token, "expiration": expiration})
+	c.JSON(http.StatusOK, gin.H{"token": token, "expiration": expiration, "id": userId, "user": user.Username})
 }
 
 func checkIfUserExists(email, username string) (string, error) {
@@ -206,5 +207,5 @@ func Login(c *gin.Context) {
 	}
 
 	// Send the token back to the user in the response
-	c.JSON(http.StatusOK, gin.H{"token": token, "expiration": expiration})
+	c.JSON(http.StatusOK, gin.H{"token": token, "expiration": expiration, "id": storedUser.ID, "user": storedUser.Username})
 }

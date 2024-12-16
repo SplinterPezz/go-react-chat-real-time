@@ -1,0 +1,81 @@
+
+.header-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.logo-container {
+  display: flex;
+  align-items: center;
+}
+
+.header-logo {
+  height: 70px;
+  margin-top: 10px;
+  cursor: pointer;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.notification-wrapper {
+  position: relative;
+}
+
+.notification-button {
+  color: white;
+  transition: all 0.3s ease;
+}
+
+.notification-button:hover {
+  transform: scale(1.1);
+}
+
+.notification-badge .MuiBadge-badge {
+  background-color: #ff5722;
+  color: white;
+}
+
+.notification-box {
+  position: absolute;
+  top: 50px;
+  right: 0;
+  min-width: 250px;
+  max-height: 300px;
+  overflow-y: auto;
+  border-radius: 8px;
+  background: white;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+  z-index: 10;
+}
+
+.notification-box::-webkit-scrollbar {
+  width: 5px;
+}
+
+.notification-box::-webkit-scrollbar-thumb {
+  background: #ccc;
+  border-radius: 8px;
+}
+
+.no-notifications-text {
+  text-align: center;
+  color: #757575;
+  padding: 8px;
+}
+
+.user-avatar {
+  cursor: pointer;
+  border: 2px solid white;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  transition: all 0.3s ease;
+}
+
+.user-avatar:hover {
+  transform: scale(1.1);
+  box-shadow: 0 6px 10px rgba(0, 0, 0, 0.2);
+}

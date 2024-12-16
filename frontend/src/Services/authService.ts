@@ -1,25 +1,7 @@
-import { ApiError, fetchFromApi } from '../Utils/apiService.ts'
+import { ApiError, LoginModel, RegisterModel, TokenAuth } from '../Models/models.ts';
+import { fetchFromApi } from '../Utils/apiService.ts'
 
-export interface LoginModel {
-  email: string;
-  password: string;
-}
 
-export interface RegisterModel {
-  username: string;
-  email: string;
-  password: string;
-}
-
-export interface RegistrationErrorModel {
-  field: string;
-  message: string
-}
-
-export interface TokenAuth {
-  token: string;
-  expiration: number;
-}
 
 
 export async function login(payload: LoginModel): Promise<TokenAuth | ApiError> {

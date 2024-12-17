@@ -1,90 +1,71 @@
 import { createSlice, PayloadAction } from '@reduxjs/toolkit';
-import { ChatMessage } from '../Models/models';
+import { Chat, ChatMessage } from '../Models/models';
 
-export interface SavedChat {
-  chatId: string;
-  messages: ChatMessage[];
-  lastMessageId: string | null;
+export interface ChatListState {
+  chats: Chat[];
+  lastUpdated: number | null;
 }
 
-export interface ChatState {
-  chats: Record<string, SavedChat>;
-}
-
-const initialState: ChatState = {
-  chats: {}
+const initialState: ChatListState = {
+  chats: [],
+  lastUpdated: null
 };
 
-const chatSlice = createSlice({
-  name: 'chat',
+const chatListSlice = createSlice({
+  name: 'chat',  // slice name is 'chat'
   initialState,
   reducers: {
-    // Initialize or update a chat's basic information
-    initChat: (state, action: PayloadAction<{ chatId: string }>) => {
-      if (!state.chats[action.payload.chatId]) {
-        state.chats[action.payload.chatId] = {
-          chatId: action.payload.chatId,
-          messages: [],
-          lastMessageId: null,
+    setChats: (state, action: PayloadAction<Chat[]>) => {
+      state.chats = action.payload;
+      state.lastUpdated = Date.now();
+    },
+    updateChat: (state, action: PayloadAction<{
+      chatId: string;
+      message: ChatMessage;
+    }>) => {
+      const { chatId, message } = action.payload;
+      const chatIndex = state.chats.findIndex(chat => chat.id === chatId);
+      
+      if (chatIndex !== -1) {
+        state.chats[chatIndex] = {
+          ...state.chats[chatIndex],
+          last_message: message.content,
+          last_message_at: message.sent_at,
+          last_message_by: message.sender,
+          last_message_id: message.id,
         };
       }
+      state.lastUpdated = Date.now();
     },
-
-    // Add or update messages for a specific chat
-    addMessages: (state, action: PayloadAction<{ chatId: string, messages: ChatMessage[]}>) => {
-      const { chatId, messages } = action.payload;
-      
-      if (!state.chats[chatId]) {
-        state.chats[chatId] = {
-          chatId,
-          lastMessageId : null,
-          messages: []
-        };
+    addChat: (state, action: PayloadAction<Chat>) => {
+      if (!state.chats.some(chat => chat.id === action.payload.id)) {
+        state.chats.push(action.payload);
+        state.lastUpdated = Date.now();
       }
-
-      // Update existing messages and add new ones
-      const existingMessageIds = new Set(state.chats[chatId].messages.map(msg => msg.id));
-      const newMessages = messages.filter(msg => !existingMessageIds.has(msg.id));
-      
-      state.chats[chatId].messages.push(...newMessages);
-      state.chats[chatId].lastMessageId = getLastMessageId(state.chats[chatId].messages)
     },
-
-    // Remove a specific chat and its messages
-    removeChat: (state, action: PayloadAction<{ chatId: string }>) => {
-      delete state.chats[action.payload.chatId];
-    },
-
-    // Clear all chats (useful for logout)
-    clearAllChats: (state) => {
-      state.chats = {};
+    clearChats: (state) => {
+      state.chats = [];
+      state.lastUpdated = null;
     }
   }
 });
 
-function getLastMessageId(messages: ChatMessage[]): string | null {
-  if (messages.length === 0) return null;
-
-  const latestMessage = messages.reduce((latestMessage, currentMessage) => 
-    new Date(currentMessage.sent_at) > new Date(latestMessage.sent_at) ? currentMessage : latestMessage
-  );
-
-  return latestMessage.id;
-}
-
-// Export actions
 export const {
-  initChat,
-  addMessages,
-  removeChat,
-  clearAllChats
-} = chatSlice.actions;
+  setChats,
+  updateChat,
+  addChat,
+  clearChats
+} = chatListSlice.actions;
 
-// Selectors
-export const selectChatById = (chatId: string) => (state: { chat: ChatState }) => 
-  state.chat.chats[chatId];
+// Fixed selectors to use 'chat' slice name consistently
+export const selectAllChats = (state: { chat: ChatListState }) => 
+  [...state.chat.chats].sort((a, b) => {
+    const dateA = new Date(a.last_message_at || 0).getTime();
+    const dateB = new Date(b.last_message_at || 0).getTime();
+    return dateB - dateA;
+  });
 
-export const selectChatMessages = (chatId: string) => (state: { chat: ChatState }) => 
-  state.chat.chats[chatId]?.messages ?? [];
+export const selectChatById = (state: { chat: ChatListState }, chatId: string) => 
+  state.chat.chats.find(chat => chat.id === chatId);
 
-export default chatSlice.reducer;
+export default chatListSlice.reducer;

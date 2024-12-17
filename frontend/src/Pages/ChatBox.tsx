@@ -2,11 +2,12 @@ import React, { useEffect, useMemo, useRef } from "react";
 import { Chat } from "../Models/models.ts";
 import TextsmsIcon from "@mui/icons-material/Textsms";
 import { Typography, Avatar, Card, CardContent } from "@mui/material";
-import { selectChatById, initChat, addMessages } from "../store/chatSlice.ts";
+import { selectChatById, initChat, addMessages, ChatState } from "../store/messagesSlice.ts";
 import { useDispatch, useSelector } from "react-redux";
 import { RootState } from "../store/store.ts";
-import { createSelector } from "@reduxjs/toolkit";
+import { createSelector, current } from "@reduxjs/toolkit";
 import { getMessageChat } from "../Services/messageService.ts";
+import { selectAllOnlineUsers } from "../store/onlineUsersSlice.ts";
 
 interface ChatBoxProps {
   chat: Chat | null;
@@ -18,6 +19,9 @@ const ChatBox: React.FC<ChatBoxProps> = ({ chat }) => {
   const pageRef = useRef<number>(1);
   const isPollingRef = useRef<boolean>(false);
   const targetMessageIdRef = useRef<string | null>(null);
+  const users = useSelector(selectAllOnlineUsers);
+  const userOnlineStatus = chat?.users.some(userId => users.some(onlineUser => onlineUser.id === userId));
+ 
 
   const retriveMessage = async (chatId: string, page: number) => {
     try {
@@ -46,16 +50,18 @@ const ChatBox: React.FC<ChatBoxProps> = ({ chat }) => {
 
   const selectCurrentChat = useMemo(
     () =>
-      createSelector([(state: RootState) => state], (state) =>
-        chat ? selectChatById(chat.id)(state) : null
+      createSelector(
+        [(state: RootState) => state],
+        (state) => chat?.id ? selectChatById(chat.id)({ chat: state.message }) : null
       ),
     [chat?.id]
   );
 
   const currentChat = useSelector(selectCurrentChat);
-
+  console.log(currentChat)
   // Effect for chat initialization and initial message retrieval
   useEffect(() => {
+    console.log("FIRST UF")
     if (chat && !currentChat) {
       dispatch(initChat({ chatId: chat.id }));
     }
@@ -138,8 +144,6 @@ const ChatBox: React.FC<ChatBoxProps> = ({ chat }) => {
       pageRef.current = 1;
     };
   }, [chat?.id]);
-
-
   
   return (
     <div className="col bg-white">
@@ -170,7 +174,7 @@ const ChatBox: React.FC<ChatBoxProps> = ({ chat }) => {
                   transform: "none !important",
                 }}
               />
-              {chat.online_status === true ? (
+              {userOnlineStatus === true ? (
                 <span
                   className="online-status-indicator"
                   style={{ left: "50px", width: "16px", height: "16px" }}
@@ -218,7 +222,7 @@ const ChatBox: React.FC<ChatBoxProps> = ({ chat }) => {
                   textOverflow: "ellipsis",
                 }}
               >
-                {chat.online_status === true ? <>Active now</> : <>Offline</>}
+                {userOnlineStatus === true ? <>Active now</> : <>Offline</>}
               </Typography>
             </CardContent>
           </Card>

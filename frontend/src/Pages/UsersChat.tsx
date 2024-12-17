@@ -4,6 +4,8 @@ import CommentsDisabledIcon from "@mui/icons-material/CommentsDisabled";
 import { motion, AnimatePresence } from "framer-motion";
 import { Card, CardContent, Typography, Avatar } from "@mui/material";
 import { containerVariants, itemVariants } from "../Utils/utils.ts";
+import { useDispatch, useSelector } from "react-redux";
+import { selectAllOnlineUsers } from "../store/onlineUsersSlice.ts";
 
 interface ChatBoxProps {
   chats: Chat[];
@@ -33,6 +35,7 @@ function formatChatDate(dateString: string): string {
 }
 
 const UsersChat: React.FC<ChatBoxProps> = ({ chats, selectChat }) => {
+  const users = useSelector(selectAllOnlineUsers);
 
   return (
     <div className=" p-0 w-100 h-100 d-flex align-items-center justify-content-center online-person-container">
@@ -74,14 +77,13 @@ const UsersChat: React.FC<ChatBoxProps> = ({ chats, selectChat }) => {
                       transition: "all 0.3s ease",
                     }}
                   >
-                    { chat && (
+                    {chat && (
                       <>
                         <div className="avatar-wrapper">
                           <Avatar
                             alt={chat.user_data?.username}
                             src={
-                              chat.user_data?.img ||
-                              chat.user_data?.username
+                              chat.user_data?.img || chat.user_data?.username
                             }
                             className="user-avatar"
                             sx={{
@@ -92,34 +94,48 @@ const UsersChat: React.FC<ChatBoxProps> = ({ chats, selectChat }) => {
                               transform: "none !important",
                             }}
                           />
-                          {chat.online_status === true ? <span className="online-status-indicator"/> : <span className="offline-status-indicator"/>}
+                          {chat.users.some((userId) =>
+                            users.some((onlineUser) => onlineUser.id === userId)
+                          ) ? (
+                            <span className="online-status-indicator" />
+                          ) : (
+                            <span className="offline-status-indicator" />
+                          )}{" "}
                         </div>
 
-                        <CardContent sx={{ padding: 0, width: "100%" }} className="p-0 m-0 g-0">
-                        <div 
-                            style={{ 
-                              display: 'flex', 
-                              justifyContent: 'space-between', 
-                              alignItems: 'center' 
+                        <CardContent
+                          sx={{ padding: 0, width: "100%" }}
+                          className="p-0 m-0 g-0"
+                        >
+                          <div
+                            style={{
+                              display: "flex",
+                              justifyContent: "space-between",
+                              alignItems: "center",
                             }}
                           >
                             <Typography
                               variant="body1"
                               sx={{
                                 fontWeight: "bold",
-                                background: "linear-gradient(45deg,rgb(56, 54, 54),rgb(60, 61, 62))",
+                                background:
+                                  "linear-gradient(45deg,rgb(56, 54, 54),rgb(60, 61, 62))",
                                 WebkitBackgroundClip: "text",
                                 WebkitTextFillColor: "transparent",
                               }}
                             >
-                              {chat.user_data?.username || "Deleted User" }
+                              {chat.user_data?.username || "Deleted User"}
                             </Typography>
 
-                            <Typography 
-                              variant="caption" 
+                            <Typography
+                              variant="caption"
                               sx={{ color: "#aaa" }}
                             >
-                              { formatChatDate(chat.last_message_at ? chat.last_message_at : 'yesterday') }
+                              {formatChatDate(
+                                chat.last_message_at
+                                  ? chat.last_message_at
+                                  : "yesterday"
+                              )}
                             </Typography>
                           </div>
                           {/* Display last message */}
@@ -133,13 +149,8 @@ const UsersChat: React.FC<ChatBoxProps> = ({ chats, selectChat }) => {
                               textOverflow: "ellipsis",
                             }}
                           >
-                            { 
-                              chat.last_message &&
-                              chat.last_message
-                            }
+                            {chat.last_message && chat.last_message}
                           </Typography>
-
-                          
                         </CardContent>
                       </>
                     )}

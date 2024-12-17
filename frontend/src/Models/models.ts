@@ -12,7 +12,6 @@ export interface Chat {
   last_message_id: string | null;
   created_at: string;
   user_data: User | null;
-  online_status: boolean | null;
 }
 
 export interface ChatMessagePaged {

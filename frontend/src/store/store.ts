@@ -11,19 +11,24 @@ import {
 } from 'redux-persist';
 import storage from 'redux-persist/lib/storage';
 import authSlice from './authSlice.ts';
-import chatSlice from './chatSlice.ts';
+import messageSlice from './messagesSlice.ts';
+import onlineUsersSlice from './onlineUsersSlice.ts'
+import chatListSlice from './chatSlice.ts'
+
 import {} from 'node-forge';
 
 const persistConfig = {
   key: 'root',
   version: 1,
   storage,
-  whitelist: ['auth', 'chat']
+  whitelist: ['auth', 'message', 'onlineUsers', 'chat']
 };
 
 const rootReducer = combineReducers({
   auth: authSlice,
-  chat: chatSlice
+  message: messageSlice,
+  chat: chatListSlice,
+  onlineUsers: onlineUsersSlice,
 });
 
 const persistedReducer = persistReducer(persistConfig, rootReducer);

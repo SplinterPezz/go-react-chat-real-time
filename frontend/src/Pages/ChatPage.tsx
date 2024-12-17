@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useMemo } from "react";
+import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { createSelector } from "@reduxjs/toolkit";
 import { RootState } from "../store/store.ts";
 import OnlineUsers from "./OnlineUsers.tsx";
@@ -17,12 +17,17 @@ import {
 import UsersChat from "./UsersChat.tsx";
 import Spinner from "../Components/Spinner.tsx";
 import { useDispatch, useSelector } from "react-redux";
-import { addMessages } from "../store/chatSlice.ts";
+import { addMessages } from "../store/messagesSlice.ts";
+import { setOnlineUsers } from "../store/onlineUsersSlice.ts";
+import { selectAllChats, addChat, updateChat, setChats } from "../store/chatSlice.ts";
 
 export type WebSocketMessage = ConnectMessage | DisconnectMessage | ChatMessage;
 
 export default function ChatPage() {
   const dispatch = useDispatch();
+  const socketRef = useRef<WebSocket | null>(null);
+  const initializeRef = useRef(false);
+
   const selectAuth = useMemo(
     () =>
       createSelector([(state: RootState) => state.auth], (auth) => ({
@@ -34,221 +39,173 @@ export default function ChatPage() {
     []
   );
 
+  const selectMemoizedChats = useMemo(
+    () => createSelector(
+      [(state: RootState) => state.chat.chats],
+      (chats) => [...chats].sort((a, b) => {
+        const dateA = new Date(a.last_message_at || 0).getTime();
+        const dateB = new Date(b.last_message_at || 0).getTime();
+        return dateB - dateA;
+      })
+    ),
+    []
+  );
+  
+  const memoizedChats = useSelector(selectMemoizedChats);
   const { token, userId, username, profilePic } = useSelector(selectAuth);
 
-  const [onlineUsers, setOnlineUsers] = useState<User[]>([]);
-  const [userChats, setUserChats] = useState<Chat[]>([]);
   const [loadingStates, setLoadingStates] = useState({
     chatsLoaded: false,
     usersLoaded: false,
     socketConnected: false,
   });
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const updateChatOnlineStatus = useCallback(
-    (onlineUserIds: string[]) => {
-      setUserChats((prevChats) =>
-        prevChats.map((chat) => ({
-          ...chat,
-          online_status: chat.users
-            .filter((userIdInChat) => userIdInChat !== userId)
-            .some((userIdInChat) => onlineUserIds.includes(userIdInChat)),
-        }))
-      );
-    },
-    [userId]
-  );
-
   const updateUserChatWithFetch = useCallback(
     async (chatId: string) => {
-
-      if (userChats.some((chat) => chat.id === chatId)) {
+      if (memoizedChats.some((chat) => chat.id === chatId)) {
         return;
       }
 
       const newChat = await getChatById(chatId);
       if ("users" in newChat) {
-        const onlineUserIds = onlineUsers.map((user) => user.id);
-
-        setUserChats((prevChats) => {
-          // Double-check to prevent race conditions
-          if (prevChats.some((chat) => chat.id === chatId)) {
-            return prevChats; // Return unchanged if chat was added
-          }
-
-          const chatWithOnlineStatus = {
-            ...newChat,
-            online_status: newChat.users
-              .filter((userIdInChat) => userIdInChat !== userId)
-              .some((userIdInChat) => onlineUserIds.includes(userIdInChat)),
-          };
-
-          return [...prevChats, chatWithOnlineStatus];
-        });
+        dispatch(addChat(newChat));
       } else {
         console.error("Failed to fetch chat:", newChat.error);
       }
     },
-    [onlineUsers, userId, userChats]
+    [dispatch, memoizedChats]
   );
-
-  // Memoized update function for online users
-  const updateOnlineUsers = useCallback((incomingUsers: User[]) => {
-    setOnlineUsers((prevUsers) => {
-      // Identify new users
-      const newUsers = incomingUsers.filter(
-        (incoming) => !prevUsers.some((existing) => existing.id === incoming.id)
-      );
-
-      // Identify users to remove
-      const usersToRemove = prevUsers.filter(
-        (existing) =>
-          !incomingUsers.some((incoming) => incoming.id === existing.id)
-      );
-
-      // Combine existing users with new users, removing those no longer online
-      const updatedUsers = [
-        ...prevUsers.filter(
-          (user) =>
-            !usersToRemove.some((removeUser) => removeUser.id === user.id)
-        ),
-        ...newUsers,
-      ];
-
-      const onlineUserIds = updatedUsers.map((user) => user.id);
-      updateChatOnlineStatus(onlineUserIds);
-
-      return updatedUsers;
-    });
-    setLoadingStates((prev) => ({ ...prev, usersLoaded: true }));
-  }, []);
 
   const handleWebSocketMessage = useCallback(
     (event: MessageEvent) => {
       try {
         const message: WebSocketMessage = JSON.parse(event.data);
         if (message.type === "connect" || message.type === "disconnect") {
-          updateOnlineUsers(message.online_users);
+          dispatch(setOnlineUsers({
+            users: message.online_users,
+            currentUserId: userId ?? ''
+          }));
         } else if (message.type === "message") {
-          console.log("Adding message to state");
-          dispatch(
-            addMessages({
-              chatId: message.chat_id,
-              messages: [message],
-            })
+          dispatch(addMessages({
+            chatId: message.chat_id,
+            messages: [message],
+          }));
+          
+          const chatExists = memoizedChats.some(
+            chat => chat.id === message.chat_id
           );
 
-          setUserChats((prevChats) => {
-            const chatExists = prevChats.some(
-              (chat) => chat.id === message.chat_id
-            );
-            console.log("Chat exist :")
-            console.log(chatExists)
-
-            if (chatExists) {
-              console.log("Updating existing chat")
-              return prevChats.map((chat) => {
-                if (chat.id === message.chat_id) {
-                  console.log(chat)
-                  return {
-                    ...chat,
-                    last_message: message.content,
-                    last_message_at: message.sent_at,
-                    last_message_by: message.sender,
-                    last_message_id: message.id,
-
-                  };
-                }
-                return chat;
-              });
-            } else {
-              console.log("Fetch from DB")
-              updateUserChatWithFetch(message.chat_id);
-              return prevChats;
-            }
-          });
+          if (chatExists) {
+            dispatch(updateChat({
+              chatId: message.chat_id,
+              message: message
+            }));
+          } else {
+            updateUserChatWithFetch(message.chat_id);
+          }
         }
       } catch (error) {
         console.error("Failed to parse WebSocket message:", error);
       }
     },
-    [updateOnlineUsers, dispatch]
+    [dispatch, userId, memoizedChats, updateUserChatWithFetch]
   );
 
   useEffect(() => {
-    let socket: WebSocket | null = null;
-
+    // Don't return early if already initialized - allow reconnection attempts
+    if (!token) return;
+  
+    let isComponentMounted = true;
+  
     const initialize = async () => {
       try {
+        console.log('Fetching chats...'); 
         const userChatsResponse = await getChats();
+  
+        if (!isComponentMounted) return;
+  
         if (Array.isArray(userChatsResponse)) {
-          setUserChats(userChatsResponse);
+          console.log('Chats fetched successfully');
+          dispatch(setChats(userChatsResponse));
           setLoadingStates((prev) => ({ ...prev, chatsLoaded: true }));
+  
+          // Close existing socket if any
+          if (socketRef.current?.readyState === WebSocket.OPEN) {
+            socketRef.current.close();
+          }
+  
+          // Create new socket
+          socketRef.current = new WebSocket(
+            `${process.env.REACT_APP_API_URL}/ws?token=${token}`
+          );
+  
+          socketRef.current.onopen = () => {
+            if (isComponentMounted) {
+              console.log('WebSocket connected');
+              setLoadingStates(prev => ({
+                ...prev,
+                socketConnected: true,
+                usersLoaded: true
+              }));
+            }
+          };
+  
+          socketRef.current.onmessage = handleWebSocketMessage;
+  
+          socketRef.current.onerror = (error) => {
+            console.error("WebSocket Error:", error);
+            if (isComponentMounted) {
+              setError("WebSocket connection error");
+              setLoadingStates(prev => ({ ...prev, socketConnected: false }));
+            }
+          };
+  
+          socketRef.current.onclose = () => {
+            if (isComponentMounted) {
+              console.log('WebSocket disconnected');
+              setLoadingStates(prev => ({ ...prev, socketConnected: false }));
+              // Attempt to reconnect
+              setTimeout(initialize, 3000);
+            }
+          };
+  
         } else {
-          setError("Failed to fetch chats");
-          throw new Error(userChatsResponse.error || "Failed to fetch chats");
+          if (isComponentMounted) {
+            console.error('Failed to fetch chats');
+            setError("Failed to fetch chats");
+            setLoadingStates(prev => ({ ...prev, socketConnected: false }));
+            throw new Error("Failed to fetch chats");
+          }
         }
-
-        if (!token) {
-          setError("No authentication token available");
-          throw new Error("No authentication token available");
-        }
-
-        socket = new WebSocket(
-          `${process.env.REACT_APP_API_URL}/ws?token=${token}`
-        );
-
-        socket.onopen = () => {
-          setLoadingStates((prev) => ({ ...prev, socketConnected: true }));
-        };
-
-        socket.onmessage = handleWebSocketMessage;
-
-        socket.onerror = (error) => {
-          console.error("WebSocket Error:", error);
+  
+      } catch (error) {
+        if (isComponentMounted) {
+          console.error("Initialization error:", error);
           setError(
             error instanceof Error
               ? error.message
-              : "WebSocket connection error"
+              : "An unexpected error occurred"
           );
-        };
-
-        socket.onclose = () => {
-          setLoadingStates((prev) => ({ ...prev, socketConnected: false }));
-        };
-      } catch (error) {
-        console.error("Initialization error:", error);
-        setError(
-          error instanceof Error
-            ? error.message
-            : "An unexpected error occurred"
-        );
+          setLoadingStates(prev => ({ ...prev, socketConnected: false }));
+        }
       }
     };
-
+  
     initialize();
-
+  
     return () => {
-      if (socket) {
-        socket.close();
+      console.log('Component cleanup initiated');
+      isComponentMounted = false;
+      
+      if (socketRef.current) {
+        socketRef.current.close();
+        socketRef.current = null;
       }
     };
-  }, [handleWebSocketMessage]);
-
-  const memoizedUsers = useMemo(
-    () => onlineUsers.filter((user) => user.id !== userId),
-    [onlineUsers, userId]
-  );
-
-  const memoizedChats = useMemo(() => {
-    return [...userChats].sort((a, b) => {
-      const dateA = new Date(a.last_message_at || 0).getTime();
-      const dateB = new Date(b.last_message_at || 0).getTime();
-      return dateB - dateA;
-    });
-  }, [userChats]);
+  }, [token, dispatch]);
 
   const memoizedSelectedChat = useMemo(() => {
     if (!selectedChatId) return null;
@@ -258,45 +215,22 @@ export default function ChatPage() {
     return selectedChat || null;
   }, [selectedChatId, memoizedChats]);
 
-  const handleSelectChatFromUsers = useCallback(
-    (userId: string | null) => {
-      if (!userId) {
-        setSelectedChatId(null);
-        return;
-      }
+  const handleSelectChat = useCallback((id: string | null, type: 'user' | 'chat') => {
+    if (!id) {
+      setSelectedChatId(null);
+      return;
+    }
 
-      const existingChat = memoizedChats.find((chat) =>
-        chat.users.includes(userId)
-      );
+    const chat = type === 'user' 
+      ? memoizedChats.find(chat => chat.users.includes(id))
+      : memoizedChats.find(chat => chat.id === id);
 
-      if (existingChat) {
-        setSelectedChatId(existingChat.id);
-      } else {
-        setSelectedChatId(null);
-        console.log("No existing chat found with this user");
-      }
-    },
-    [memoizedChats]
-  );
+    setSelectedChatId(chat?.id || null);
+  }, [memoizedChats]);
 
-  const handleSelectChatFromChats = useCallback(
-    (chatId: string | null) => {
-      if (!chatId) {
-        setSelectedChatId(null);
-        return;
-      }
-
-      const existingChat = memoizedChats.find((chat) => chat.id === chatId);
-
-      if (existingChat) {
-        setSelectedChatId(existingChat.id);
-      } else {
-        //this should not happen
-        setSelectedChatId(null);
-      }
-    },
-    [memoizedChats]
-  );
+  if (!loadingStates.socketConnected || !loadingStates.chatsLoaded) {
+    return <Spinner />;
+  }
 
   // Notifications (consider moving to a more dynamic source)
   const notifications: NotificationMessage[] = [
@@ -306,7 +240,7 @@ export default function ChatPage() {
 
   return (
     <>
-      {!loadingStates.socketConnected ? (
+      {!loadingStates.socketConnected || !loadingStates.chatsLoaded ? (
         <Spinner />
       ) : (
         <div className="container-fluid">
@@ -315,14 +249,10 @@ export default function ChatPage() {
               style={{ flex: "0 0 360px" }}
               className="g-0 p-0 d-none d-md-block"
             >
-              {
-                loadingStates.chatsLoaded &&
-                <UsersChat
-                  chats={memoizedChats}
-                  selectChat={handleSelectChatFromChats}
-                />
-              }
-              
+              <UsersChat
+                chats={memoizedChats}
+                selectChat={(chatId) => handleSelectChat(chatId, 'chat')}
+              />
             </div>
             <div className="flex-grow-1 g-0 p-0" style={{ flex: 0 }}>
               <div className="container-fluid vh-100 d-flex flex-column g-0 p-0">
@@ -340,15 +270,11 @@ export default function ChatPage() {
               style={{ flex: "0 0 360px" }}
               className="g-0 p-0 d-none d-xl-block"
             >
-              {
-                loadingStates.usersLoaded &&
+              {loadingStates.usersLoaded && (
                 <OnlineUsers
-                  users={memoizedUsers}
-                  selectChat={handleSelectChatFromUsers}
+                  selectChat={(userId) => handleSelectChat(userId, 'user')}
                 />
-              }
-
-              
+              )}
             </div>
           </div>
         </div>

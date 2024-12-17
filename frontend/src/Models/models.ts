@@ -14,6 +14,10 @@ export interface Chat {
   user_data: User | null;
 }
 
+export interface CreateChatRequest {
+  user_id : string
+}
+
 export interface ChatMessagePaged {
   messages : ChatMessage[] | [];
   total_pages: number;
@@ -54,6 +58,11 @@ export interface ChatMessage {
   sender: string;
   content: string;
   sent_at: string;
+}
+
+export interface SendChatMessage {
+  chat_id: string;
+  content: string;
 }
 
 export interface LoginModel {

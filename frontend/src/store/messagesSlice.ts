@@ -56,7 +56,7 @@ const messagesSlice = createSlice({
     },
 
     // Clear all chats (useful for logout)
-    clearAllChats: (state) => {
+    clearAllMessages: (state) => {
       state.chats = {};
     }
   }
@@ -77,7 +77,7 @@ export const {
   initChat,
   addMessages,
   removeChat,
-  clearAllChats
+  clearAllMessages
 } = messagesSlice.actions;
 
 // Selectors

@@ -1,11 +1,11 @@
 import React, { useEffect, useMemo, useRef } from "react";
-import { Chat } from "../Models/models.ts";
+import { Chat, ChatMessage } from "../Models/models.ts";
 import TextsmsIcon from "@mui/icons-material/Textsms";
 import { Typography, Avatar, Card, CardContent } from "@mui/material";
-import { selectChatById, initChat, addMessages, ChatState } from "../store/messagesSlice.ts";
+import { selectChatById, initChat, addMessages } from "../store/messagesSlice.ts";
 import { useDispatch, useSelector } from "react-redux";
 import { RootState } from "../store/store.ts";
-import { createSelector, current } from "@reduxjs/toolkit";
+import { createSelector } from "@reduxjs/toolkit";
 import { getMessageChat } from "../Services/messageService.ts";
 import { selectAllOnlineUsers } from "../store/onlineUsersSlice.ts";
 
@@ -20,8 +20,26 @@ const ChatBox: React.FC<ChatBoxProps> = ({ chat }) => {
   const isPollingRef = useRef<boolean>(false);
   const targetMessageIdRef = useRef<string | null>(null);
   const users = useSelector(selectAllOnlineUsers);
+  const username = useSelector((state: RootState) => state.auth.user);
   const userOnlineStatus = chat?.users.some(userId => users.some(onlineUser => onlineUser.id === userId));
- 
+
+  const selectCurrentChat = useMemo(
+    () =>
+      createSelector(
+        [(state: RootState) => state],
+        (state) => chat?.id ? selectChatById(chat.id)({ chat: state.message }) : null
+      ),
+    [chat?.id]
+  );
+
+  const currentChat = useSelector(selectCurrentChat);
+
+  const formatTimestamp = (timestamp: string) => {
+    return new Date(timestamp).toLocaleTimeString([], { 
+      hour: '2-digit', 
+      minute: '2-digit' 
+    });
+  };
 
   const retriveMessage = async (chatId: string, page: number) => {
     try {
@@ -48,20 +66,9 @@ const ChatBox: React.FC<ChatBoxProps> = ({ chat }) => {
     }
   };
 
-  const selectCurrentChat = useMemo(
-    () =>
-      createSelector(
-        [(state: RootState) => state],
-        (state) => chat?.id ? selectChatById(chat.id)({ chat: state.message }) : null
-      ),
-    [chat?.id]
-  );
-
-  const currentChat = useSelector(selectCurrentChat);
-  console.log(currentChat)
   // Effect for chat initialization and initial message retrieval
+  // In case of empty store, retrive the last N messages 
   useEffect(() => {
-    console.log("FIRST UF")
     if (chat && !currentChat) {
       dispatch(initChat({ chatId: chat.id }));
     }
@@ -77,15 +84,18 @@ const ChatBox: React.FC<ChatBoxProps> = ({ chat }) => {
     }
   }, [chat?.id, currentChat?.messages.length]);
 
-  // Effect for message polling
+  // Effect for message polling in case of chat.last_message is not on store
+  // In case the chat is in the store but last message is not in the store.
   useEffect(() => {
+    console.log("CAN POLLING?")
     if (
       chat &&
       currentChat &&
       chat.last_message &&
       currentChat.messages.length > 0 &&
       !isPollingRef.current &&
-      !currentChat.messages.some(message => message.id === chat.last_message_id)
+      currentChat.lastMessageId !== chat.last_message_id
+      //!currentChat.messages.some(message => message.id === chat.last_message_id)
     ) {
       console.log("Starting message polling");
       isPollingRef.current = true;
@@ -144,6 +154,61 @@ const ChatBox: React.FC<ChatBoxProps> = ({ chat }) => {
       pageRef.current = 1;
     };
   }, [chat?.id]);
+
+  const MessageBubble: React.FC<{ message: ChatMessage }> = ({ message }) => {
+    const isCurrentUser = chat?.user_data?.id === message.sender;
+    
+    return (
+      <div className={`d-flex ${isCurrentUser ? 'justify-content-end' : 'justify-content-start'} mb-3`}>
+        <div style={{ maxWidth: '70%' }}>
+          <div
+            style={{
+              backgroundColor: isCurrentUser ? '#DCF8C6' : '#E3F2FD',
+              borderRadius: '15px',
+              padding: '10px 15px',
+              position: 'relative',
+              marginLeft: isCurrentUser ? '0' : '8px',
+              marginRight: isCurrentUser ? '8px' : '0',
+              boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
+            }}
+          >
+            <div className="d-flex justify-content-between align-items-center mb-1">
+              <Typography
+                variant="caption"
+                sx={{
+                  fontWeight: 'bold',
+                  color: isCurrentUser ? '#2E7D32' : '#1565C0'
+                }}
+              >
+                {isCurrentUser ? username : chat?.user_data?.username || 'Deleted User'}
+              </Typography>
+            </div>
+            <Typography
+              variant="body1"
+              sx={{
+                wordBreak: 'break-word',
+                color: '#262626'
+              }}
+            >
+              {message.content}
+            </Typography>
+            <Typography
+              variant="caption"
+              sx={{
+                color: '#666',
+                display: 'block',
+                textAlign: 'right',
+                marginTop: '4px',
+                fontSize: '0.7rem'
+              }}
+            >
+              {formatTimestamp(message.sent_at)}
+            </Typography>
+          </div>
+        </div>
+      </div>
+    );
+  };
   
   return (
     <div className="col bg-white">
@@ -212,7 +277,6 @@ const ChatBox: React.FC<ChatBoxProps> = ({ chat }) => {
                   {chat.user_data?.username || "Deleted User"}
                 </Typography>
               </div>
-              {/* Display online status */}
               <Typography
                 variant="body2"
                 sx={{
@@ -224,6 +288,32 @@ const ChatBox: React.FC<ChatBoxProps> = ({ chat }) => {
               >
                 {userOnlineStatus === true ? <>Active now</> : <>Offline</>}
               </Typography>
+            </CardContent>
+          </Card>
+          
+          <Card
+            sx={{
+              boxShadow: "none",
+              width: "100%",
+              borderRadius: "0px",
+              transition: "all 0.3s ease",
+              maxHeight: "calc(100vh - 300px)",
+              overflowY: "auto"
+            }}
+          >
+            <CardContent
+              sx={{ 
+                padding: "1rem !important",
+                "&:last-child": { paddingBottom: "1rem !important" }
+              }}
+            >
+              {currentChat && currentChat.messages.length > 0 && (
+                <div className="messages-container">
+                  {currentChat.messages.map((message) => (
+                    <MessageBubble key={message.id} message={message} />
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>

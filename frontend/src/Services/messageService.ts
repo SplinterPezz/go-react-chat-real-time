@@ -1,5 +1,5 @@
 import { fetchFromApi } from '../Utils/apiService.ts'
-import { HelloModel, Chat, ApiError, ChatMessagePaged } from '../Models/models.ts';
+import { HelloModel, Chat, ApiError, ChatMessagePaged, CreateChatRequest } from '../Models/models.ts';
 
 export const DEFAULT_LIMIT_PAGE_MESSAGE: number = 20;
 
@@ -64,5 +64,18 @@ export async function getMessageChat(
   if (response) {
     return response as ChatMessagePaged;
   }
+  return response as ApiError;
+}
+
+export async function createChat(payload: CreateChatRequest): Promise<Chat | ApiError> {
+  const response = await fetchFromApi<Chat | ApiError>('/createChat', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  
+  if (response) {
+    return response as Chat;
+  }
+
   return response as ApiError;
 }

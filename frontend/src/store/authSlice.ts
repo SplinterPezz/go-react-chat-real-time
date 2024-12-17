@@ -1,7 +1,8 @@
 import { createSlice, PayloadAction } from '@reduxjs/toolkit';
-import { clearAllChats } from './messagesSlice.ts';
+import { clearAllMessages } from './messagesSlice.ts';
 import { clearOnlineUsers } from './onlineUsersSlice.ts';
 import { AppDispatch } from './store';
+import { clearChats } from './chatSlice.ts';
 
 export interface AuthState {
   id: string | null;
@@ -55,7 +56,8 @@ const authSlice = createSlice({
 
 export const { loginSuccess, logoutSuccess, checkAuthentication } = authSlice.actions;
 export const logout = () => (dispatch: AppDispatch) => {
-  dispatch(clearAllChats());
+  dispatch(clearAllMessages());
+  dispatch(clearChats())
   dispatch(clearOnlineUsers());
   dispatch(logoutSuccess());
 };
